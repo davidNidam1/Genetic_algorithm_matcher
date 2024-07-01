@@ -1,0 +1,161 @@
+import numpy as np
+import random
+import matplotlib.pyplot as plt
+
+# Function to read preferences from a file and split into men and women preferences
+def read_preferences(file_path):
+    with open(file_path, 'r') as file:
+        preferences = np.array([list(map(int, line.split())) for line in file])
+    return preferences[:30], preferences[30:]
+
+# Function to calculate the happiness cost
+def happiness_cost(solution, men_preferences, women_preferences):
+    happiness = 0
+    for man, woman in enumerate(solution):
+        man_pref = np.where(men_preferences[man] == woman + 1)[0][0]
+        woman_pref = np.where(women_preferences[woman] == man + 1)[0][0]
+        happiness += man_pref + woman_pref
+    return happiness
+
+# Function to calculate the egalitarian cost
+def egalitarian_cost(solution, men_preferences, women_preferences):
+    egalitarian = 0
+    for man, woman in enumerate(solution):
+        man_pref = np.where(men_preferences[man] == woman + 1)[0][0]
+        woman_pref = np.where(women_preferences[woman] == man + 1)[0][0]
+        egalitarian += abs(man_pref - woman_pref)
+    return egalitarian
+
+# Function to evaluate a solution by calculating the fitness value
+def evaluate_solution(solution, men_preferences, women_preferences):
+    h_cost = happiness_cost(solution, men_preferences, women_preferences)
+    eh_cost = egalitarian_cost(solution, men_preferences, women_preferences)
+    return h_cost - eh_cost  # Combine happiness and egalitarian costs
+
+# Function to get the best and worst possible scores for normalization
+def get_score_range(men_preferences, women_preferences):
+    worst_score = 0
+    best_score = 0
+    n = len(men_preferences)
+    for i in range(n):
+        worst_score += n - 1  # Worst rank is (n-1) for 0-based index
+        best_score += 0       # Best rank is 0 for 0-based index
+    return best_score, worst_score
+
+# Function to normalize scores to a range of 1-100
+def normalize_score(score, best_score, worst_score):
+    return 100 * (1 - (score - best_score) / (worst_score - best_score))
+
+# Function to perform single-point cut-and-paste crossover between two parents
+def single_point_crossover(parent1, parent2, crossover_rate):
+    if random.random() < crossover_rate:
+        size = len(parent1)
+        point = random.randint(1, size - 1)
+        child = parent1[:point] + [x for x in parent2 if x not in parent1[:point]]
+        return child
+    else:
+        return parent1
+
+# Function to mutate a solution by swapping two random positions
+def mutate(solution, mutation_rate):
+    if random.random() < mutation_rate:
+        size = len(solution)
+        p1, p2 = random.randint(0, size - 1), random.randint(0, size - 1)
+        solution[p1], solution[p2] = solution[p2], solution[p1]
+    return solution
+
+# Function to select a parent using tournament selection
+def tournament_selection(population, men_preferences, women_preferences, tournament_size):
+    selected = random.sample(population, tournament_size)
+    selected = sorted(selected, key=lambda sol: evaluate_solution(sol, men_preferences, women_preferences))
+    return selected[0]
+
+# Main function implementing the genetic algorithm
+def genetic_algorithm(men_preferences, women_preferences, population_size, generations, crossover_rate, mutation_rate, elitism_percentage, tournament_size):
+    population = [random.sample(range(30), 30) for _ in range(population_size)]
+    best_solution = min(population, key=lambda sol: evaluate_solution(sol, men_preferences, women_preferences))
+    best_score = evaluate_solution(best_solution, men_preferences, women_preferences)
+    
+    best_scores = []
+    worst_scores = []
+    average_scores = []
+
+    best_possible_score, worst_possible_score = get_score_range(men_preferences, women_preferences)
+
+    for generation in range(generations):
+        population = sorted(population, key=lambda sol: evaluate_solution(sol, men_preferences, women_preferences))
+        
+        # Elitism: Select the top ELITE_PERCENTAGE individuals as parents for the next generation
+        elite_size = int(population_size * elitism_percentage)
+        new_population = population[:elite_size]
+
+        # Create offspring through crossover and mutation
+        while len(new_population) < population_size:
+            parent1 = tournament_selection(population, men_preferences, women_preferences, tournament_size)
+            parent2 = tournament_selection(population, men_preferences, women_preferences, tournament_size)
+            
+            child = single_point_crossover(parent1, parent2, crossover_rate)
+            mutated_child = mutate(child, mutation_rate)
+            new_population.append(mutated_child)
+
+        population = new_population[:population_size]
+
+        scores = [evaluate_solution(sol, men_preferences, women_preferences) for sol in population]
+        current_best = min(scores)
+        current_worst = max(scores)
+        current_average = sum(scores) / len(scores)
+
+        best_scores.append(normalize_score(current_best, best_possible_score, worst_possible_score))
+        worst_scores.append(normalize_score(current_worst, best_possible_score, worst_possible_score))
+        average_scores.append(normalize_score(current_average, best_possible_score, worst_possible_score))
+
+        if current_best < best_score:
+            best_solution = population[scores.index(current_best)]
+            best_score = current_best
+
+    return best_solution, best_score, best_scores, worst_scores, average_scores
+
+# Function to plot the results
+def plot_results(generations, best_scores, worst_scores, average_scores, title):
+    plt.figure(figsize=(10, 6))
+    plt.plot(range(generations), best_scores, label='Best Score')
+    plt.plot(range(generations), worst_scores, label='Worst Score')
+    plt.plot(range(generations), average_scores, label='Average Score')
+    plt.ylim(0, 100)
+    plt.xlabel('Generations')
+    plt.ylabel('Normalized Score (1-100)')
+    plt.title(title)
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+if __name__ == "__main__":
+    men_preferences, women_preferences = read_preferences('try.txt')
+    
+    # Parameters
+    params = [
+        (100, 180),  # (generations, population_size)
+        (180, 100),
+        (120, 150)
+    ]
+    
+    crossover_rate = 0.85
+    mutation_rate = 0.30
+    elitism_percentage = 0.15
+    tournament_size = 5
+    
+    for generations, population_size in params:
+        # Run the genetic algorithm with the specified parameters
+        best_solution, best_score, best_scores, worst_scores, average_scores = genetic_algorithm(
+            men_preferences, women_preferences, population_size, generations, crossover_rate, mutation_rate, elitism_percentage, tournament_size)
+        
+        best_possible_score, worst_possible_score = get_score_range(men_preferences, women_preferences)
+        normalized_score = normalize_score(best_score, best_possible_score, worst_possible_score)
+        
+        print(f"Population Size: {population_size}, Generations: {generations}")
+        print(f"Best Matching: {best_solution}")
+        print(f"Best Score: {best_score}")
+        print(f"Normalized Score (1-100): {normalized_score}")
+        
+        title = f"Population Size: {population_size}, Generations: {generations}"
+        plot_results(generations, best_scores, worst_scores, average_scores, title)
